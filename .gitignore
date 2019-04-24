@@ -6,3 +6,6 @@
 *~
 *.exe
 *.tar.gz
+
+.idea/
+*.iml
