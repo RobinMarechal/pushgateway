@@ -15,6 +15,7 @@ package handler
 
 import (
 	"bytes"
+	"github.com/prometheus/pushgateway/lib"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,36 +28,9 @@ import (
 	"github.com/prometheus/pushgateway/storage"
 )
 
-type MockMetricStore struct {
-	lastWriteRequest storage.WriteRequest
-}
-
-func (m *MockMetricStore) SubmitWriteRequest(req storage.WriteRequest) {
-	m.lastWriteRequest = req
-}
-
-func (m *MockMetricStore) GetMetricFamilies() []*dto.MetricFamily {
-	panic("not implemented")
-}
-
-func (m *MockMetricStore) GetMetricFamiliesMap() storage.GroupingKeyToMetricGroup {
-	panic("not implemented")
-}
-
-func (m *MockMetricStore) Shutdown() error {
-	return nil
-}
-
-func (m *MockMetricStore) Healthy() error {
-	return nil
-}
-
-func (m *MockMetricStore) Ready() error {
-	return nil
-}
 
 func TestHealthyReady(t *testing.T) {
-	mms := MockMetricStore{}
+	mms := lib.MockMetricStore{}
 	req, err := http.NewRequest("GET", "http://example.org/", &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +52,7 @@ func TestHealthyReady(t *testing.T) {
 }
 
 func TestPush(t *testing.T) {
-	mms := MockMetricStore{}
+	mms := lib.MockMetricStore{}
 	handler := Push(&mms, false)
 	req, err := http.NewRequest("POST", "http://example.org/", &bytes.Buffer{})
 	if err != nil {
@@ -91,29 +65,29 @@ func TestPush(t *testing.T) {
 	if expected, got := http.StatusBadRequest, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if !mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.lastWriteRequest)
+	if !mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.LastWriteRequest)
 	}
 
 	// With job name, but no instance name and no content.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	w = httptest.NewRecorder()
 	handler(w, req, httprouter.Params{httprouter.Param{Key: "job", Value: "testjob"}})
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
 
 	// With job name and instance name and invalid text content.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	req, err = http.NewRequest(
 		"POST", "http://example.org/",
 		bytes.NewBufferString("blablabla\n"),
@@ -132,12 +106,12 @@ func TestPush(t *testing.T) {
 	if expected, got := http.StatusBadRequest, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if !mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.lastWriteRequest)
+	if !mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.LastWriteRequest)
 	}
 
 	// With job name and instance name and text content.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	req, err = http.NewRequest(
 		"POST", "http://example.org/",
 		bytes.NewBufferString("some_metric 3.14\nanother_metric 42\n"),
@@ -156,27 +130,27 @@ func TestPush(t *testing.T) {
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "testinstance", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "testinstance", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.lastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
+	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.LastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:42 > > `, mms.lastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
+	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:42 > > `, mms.LastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
-	if _, ok := mms.lastWriteRequest.MetricFamilies["push_time_seconds"]; !ok {
+	if _, ok := mms.LastWriteRequest.MetricFamilies["push_time_seconds"]; !ok {
 		t.Errorf("Wanted metric family push_time_seconds missing.")
 	}
 
 	// With job name and no instance name and text content.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	req, err = http.NewRequest(
 		"POST", "http://example.org/",
 		bytes.NewBufferString("some_metric 3.14\nanother_metric 42\n"),
@@ -194,24 +168,24 @@ func TestPush(t *testing.T) {
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.lastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
+	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.LastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"" > label:<name:"job" value:"testjob" > untyped:<value:42 > > `, mms.lastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
+	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"" > label:<name:"job" value:"testjob" > untyped:<value:42 > > `, mms.LastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
 
 	// With job name and instance name and timestamp specified.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	req, err = http.NewRequest(
 		"POST", "http://example.org/",
 		bytes.NewBufferString("a 1\nb 1 1000\n"),
@@ -230,12 +204,12 @@ func TestPush(t *testing.T) {
 	if expected, got := http.StatusBadRequest, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if !mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.lastWriteRequest)
+	if !mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.LastWriteRequest)
 	}
 
 	// With job name and instance name and text content and job and instance labels.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	req, err = http.NewRequest(
 		"POST", "http://example.org",
 		bytes.NewBufferString(`
@@ -257,24 +231,24 @@ another_metric{instance="baz"} 42
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "testinstance", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "testinstance", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.lastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
+	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.LastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:42 > > `, mms.lastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
+	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:42 > > `, mms.LastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
 
 	// With job name and instance name and protobuf content.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	buf := &bytes.Buffer{}
 	_, err = pbutil.WriteDelimited(buf, &dto.MetricFamily{
 		Name: proto.String("some_metric"),
@@ -324,29 +298,29 @@ another_metric{instance="baz"} 42
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "testinstance", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "testinstance", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:1.234 > > `, mms.lastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
+	if expected, got := `name:"some_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:1.234 > > `, mms.LastWriteRequest.MetricFamilies["some_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
-	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.lastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
+	if expected, got := `name:"another_metric" type:UNTYPED metric:<label:<name:"instance" value:"testinstance" > label:<name:"job" value:"testjob" > untyped:<value:3.14 > > `, mms.LastWriteRequest.MetricFamilies["another_metric"].String(); expected != got {
 		t.Errorf("Wanted metric family %v, got %v.", expected, got)
 	}
 }
 
 func TestDelete(t *testing.T) {
-	mms := MockMetricStore{}
+	mms := lib.MockMetricStore{}
 	handler := Delete(&mms)
 
 	// No job name.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	w := httptest.NewRecorder()
 	handler(
 		w, &http.Request{},
@@ -355,12 +329,12 @@ func TestDelete(t *testing.T) {
 	if expected, got := http.StatusBadRequest, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if !mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.lastWriteRequest)
+	if !mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp unexpectedly set: %#v", mms.LastWriteRequest)
 	}
 
 	// With job name, but no instance name.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	w = httptest.NewRecorder()
 	handler(
 		w, &http.Request{},
@@ -371,18 +345,18 @@ func TestDelete(t *testing.T) {
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
 
 	// With job name and instance name.
-	mms.lastWriteRequest = storage.WriteRequest{}
+	mms.LastWriteRequest = storage.WriteRequest{}
 	w = httptest.NewRecorder()
 	handler(
 		w, &http.Request{},
@@ -394,13 +368,13 @@ func TestDelete(t *testing.T) {
 	if expected, got := http.StatusAccepted, w.Code; expected != got {
 		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
-	if mms.lastWriteRequest.Timestamp.IsZero() {
-		t.Errorf("Write request timestamp not set: %#v", mms.lastWriteRequest)
+	if mms.LastWriteRequest.Timestamp.IsZero() {
+		t.Errorf("Write request timestamp not set: %#v", mms.LastWriteRequest)
 	}
-	if expected, got := "testjob", mms.lastWriteRequest.Labels["job"]; expected != got {
+	if expected, got := "testjob", mms.LastWriteRequest.Labels["job"]; expected != got {
 		t.Errorf("Wanted job %v, got %v.", expected, got)
 	}
-	if expected, got := "testinstance", mms.lastWriteRequest.Labels["instance"]; expected != got {
+	if expected, got := "testinstance", mms.LastWriteRequest.Labels["instance"]; expected != got {
 		t.Errorf("Wanted instance %v, got %v.", expected, got)
 	}
 }
