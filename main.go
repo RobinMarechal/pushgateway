@@ -14,6 +14,7 @@
 package main
 
 import (
+	"github.com/prometheus/pushgateway/lib"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -54,11 +55,15 @@ func main() {
 		routePrefix         = app.Flag("web.route-prefix", "Prefix for the internal routes of web endpoints. Defaults to the path of --web.external-url.").Default("").String()
 		persistenceFile     = app.Flag("persistence.file", "File to persist metrics. If empty, metrics are only kept in memory.").Default("").String()
 		persistenceInterval = app.Flag("persistence.interval", "The minimum interval at which to write out the persistence file.").Default("5m").Duration()
+		clearInterval       = app.Flag("clear.interval", "The interval at which to clear all the metrics in memory. Incompatible with disk persistence. 0m = never.").Default("0m").Duration()
 	)
+
 	log.AddFlags(app)
 	app.Version(version.Print("pushgateway"))
 	app.HelpFlag.Short('h')
 	kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	enableClearingScheduler := handleClearingScheduler(clearInterval, persistenceFile)
 
 	*routePrefix = computeRoutePrefix(*routePrefix, *externalURL)
 
@@ -75,6 +80,11 @@ func main() {
 	}
 
 	ms := storage.NewDiskMetricStore(*persistenceFile, *persistenceInterval, prometheus.DefaultGatherer)
+
+	// If the clearing scheduler is enabled, we start it
+	if enableClearingScheduler {
+		go lib.ScheduledClear(ms, clearInterval)
+	}
 
 	// Inject the metric families returned by ms.GetMetricFamilies into the default Gatherer:
 	prometheus.DefaultGatherer = prometheus.Gatherers{
@@ -95,6 +105,7 @@ func main() {
 	r.PUT(pushAPIPath+"/job/:job", handler.Push(ms, true))
 	r.POST(pushAPIPath+"/job/:job", handler.Push(ms, false))
 	r.DELETE(pushAPIPath+"/job/:job", handler.Delete(ms))
+	r.DELETE(pushAPIPath+"/all", handler.DeleteAll(ms))
 
 	r.Handler("GET", *routePrefix+"/static/*filepath", handler.Static(asset.Assets, *routePrefix))
 
@@ -162,4 +173,22 @@ func interruptHandler(l net.Listener) {
 	<-notifier
 	log.Info("Received SIGINT/SIGTERM; exiting gracefully...")
 	l.Close()
+}
+
+// Fatal error if the command line flags are invalid
+func handleClearingScheduler(clearInterval *time.Duration, persistenceFile *string) bool {
+	// Clearing interval should not be lower than 1 minute
+	// But 0m means is equivalent to disabling
+	if clearInterval.Seconds() > 0 && clearInterval.Minutes() < 1 {
+		log.Fatal("Clearing scheduler interval cannot be lower than 1 minute.")
+	}
+
+	// scheduler is enable if >= 1m, but is incompatible with file persistence
+	enableClearingScheduler := clearInterval.Seconds() > 0
+	if enableClearingScheduler && *persistenceFile != "" {
+		log.Fatal("Clearing scheduler and file persistence cannot be both enabled.")
+	}
+
+	// If the scheduler is enabled, then it is valid (true), otherwise it is disabled (false)
+	return enableClearingScheduler
 }

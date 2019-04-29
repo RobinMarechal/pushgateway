@@ -2,7 +2,6 @@ package lib
 
 import (
 	"github.com/golang/protobuf/proto"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/pushgateway/storage"
 	"math"
 	"testing"
@@ -27,14 +26,6 @@ var (
 						Name:  proto.String("instance"),
 						Value: proto.String("instance2"),
 					},
-					{
-						Name:  proto.String("labelname"),
-						Value: proto.String("val2"),
-					},
-					{
-						Name:  proto.String("basename"),
-						Value: proto.String("basevalue2"),
-					},
 				},
 				Gauge: &dto.Gauge{
 					Value: proto.Float64(math.Inf(+1)),
@@ -50,10 +41,6 @@ var (
 					{
 						Name:  proto.String("instance"),
 						Value: proto.String("instance2"),
-					},
-					{
-						Name:  proto.String("labelname"),
-						Value: proto.String("val1"),
 					},
 				},
 				Gauge: &dto.Gauge{
@@ -104,34 +91,10 @@ var (
 			},
 		},
 	}
-	mf4 = &dto.MetricFamily{
-		Name: proto.String("mf5"),
-		Type: dto.MetricType_SUMMARY.Enum(),
-		Metric: []*dto.Metric{
-			{
-				Label: []*dto.LabelPair{
-					{
-						Name:  proto.String("job"),
-						Value: proto.String("job5"),
-					},
-					{
-						Name:  proto.String("instance"),
-						Value: proto.String("instance5"),
-					},
-				},
-				Summary: &dto.Summary{
-					SampleCount: proto.Uint64(0),
-					SampleSum:   proto.Float64(0),
-				},
-			},
-		},
-	}
 )
 
-func TestSplitLabels(t *testing.T) {
-	ms := storage.NewDiskMetricStore("", time.Duration(5), prometheus.DefaultGatherer)
-
-	dms := storage.NewDiskMetricStore("", 100*time.Millisecond, nil)
+func TestClearMetrics(t *testing.T) {
+	dms := storage.NewDiskMetricStore("", time.Minute, nil)
 
 	labels1 := map[string]string{
 		"job":      "job1",
@@ -152,7 +115,6 @@ func TestSplitLabels(t *testing.T) {
 	})
 	time.Sleep(20 * time.Millisecond) // Give loop() time to process.
 
-
 	// Submit two metric families for a different instance.
 	ts2 := ts1.Add(time.Second)
 	dms.SubmitWriteRequest(storage.WriteRequest{
@@ -160,6 +122,13 @@ func TestSplitLabels(t *testing.T) {
 		Timestamp:      ts2,
 		MetricFamilies: map[string]*dto.MetricFamily{"mf1": mf1, "mf2": mf2},
 	})
+	time.Sleep(20 * time.Millisecond) // Give loop() time to process.
 
-	ClearMetrics(ms)
+	ClearMetrics(dms)
+
+	time.Sleep(20 * time.Millisecond) // Give loop() time to process.
+
+	if expected, got := 0, len(dms.GetMetricFamiliesMap()); got != expected {
+		t.Errorf("Wanted mfs length %v, got %v.", expected, got)
+	}
 }

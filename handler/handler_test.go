@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/julienschmidt/httprouter"
@@ -409,5 +410,19 @@ func TestSplitLabels(t *testing.T) {
 	_, err = splitLabels(reservedLabels)
 	if err == nil {
 		t.Error("Expected splitLabels to return an error when given a reserved label.")
+	}
+}
+
+func TestDeleteAll(t *testing.T) {
+	dms := storage.NewDiskMetricStore("", time.Minute, nil)
+	handler := DeleteAll(dms)
+
+	w := httptest.NewRecorder()
+	handler(
+		w, &http.Request{},
+		httprouter.Params{},
+	)
+	if expected, got := http.StatusAccepted, w.Code; expected != got {
+		t.Errorf("Wanted status code %v, got %v.", expected, got)
 	}
 }

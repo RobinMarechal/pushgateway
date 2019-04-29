@@ -14,6 +14,7 @@
 package handler
 
 import (
+	"github.com/prometheus/pushgateway/lib"
 	"net/http"
 	"sync"
 	"time"
@@ -63,6 +64,25 @@ func Delete(ms storage.MetricStore) func(http.ResponseWriter, *http.Request, htt
 	return func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 		mtx.Lock()
 		ps = params
+		instrumentedHandler.ServeHTTP(w, r)
+	}
+}
+
+func DeleteAll(ms storage.MetricStore) func(http.ResponseWriter, *http.Request, httprouter.Params) {
+	var mtx sync.Mutex // Protects ps.
+
+	instrumentedHandler := promhttp.InstrumentHandlerCounter(
+		httpCnt.MustCurryWith(prometheus.Labels{"handler": "delete"}),
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+
+			mtx.Unlock()
+			lib.ClearMetrics(ms)
+			w.WriteHeader(http.StatusAccepted)
+		}),
+	)
+
+	return func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+		mtx.Lock()
 		instrumentedHandler.ServeHTTP(w, r)
 	}
 }
